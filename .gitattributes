@@ -1,0 +1,2 @@
+# ObjectScript / Pascal fixtures shouldn't be treated as generated
+*.cls linguist-language=ObjectScript

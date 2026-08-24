@@ -1,0 +1,20 @@
+# Taint profile for Pascal / Delphi.
+identifiers: [identifier]
+
+assignments:
+  - query: "(assignment lhs: (identifier) @lhs rhs: (_) @rhs)"
+  - query: "(assignment lhs: (exprDot) @lhs rhs: (_) @rhs)"
+  - query: "(assignment lhs: (exprSubscript) @lhs rhs: (_) @rhs)"
+
+functions:
+  - query: "(defProc header: (declProc name: (identifier) @name)) @function"
+
+params:
+  - query: "(declArg name: (identifier) @param)"
+
+calls:
+  - query: "(exprCall entity: (identifier) @callee args: (exprArgs) @args) @call"
+
+returns:
+  # Pascal functions return by assigning to `Result`.
+  - query: "((assignment lhs: (identifier) @_res rhs: (_) @value) (#eq? @_res \"Result\"))"

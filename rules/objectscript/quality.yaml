@@ -1,0 +1,34 @@
+# Code quality rules for InterSystems ObjectScript.
+rules:
+  - id: os.quality.goto
+    severity: low
+    category: quality
+    languages: [objectscript]
+    message: "GOTO complicates control flow"
+    description: >
+      GOTO makes routines hard to follow and refactor; prefer structured
+      IF/FOR/WHILE blocks or early QUIT.
+    metadata:
+      cwe: [CWE-1120]
+    query: "(command_goto) @finding"
+
+  - id: os.quality.empty-catch
+    severity: low
+    category: quality
+    languages: [objectscript]
+    message: "Empty CATCH block silently swallows errors"
+    remediation: Log the exception (e.g. via ##class(%SYS.System).WriteToConsoleLog) or rethrow.
+    metadata:
+      cwe: [CWE-390]
+    query: |
+      ((catch_block) @finding
+        (#match? @finding "(?s)^[Cc][Aa][Tt][Cc][Hh]\\s*(\\w+)?\\s*\\{\\s*\\}"))
+
+  - id: os.quality.deprecated-ztrap
+    severity: low
+    category: quality
+    languages: [objectscript]
+    message: "$ZTRAP error handling is legacy; prefer TRY/CATCH"
+    metadata:
+      tags: [legacy]
+    query: "(command_ztrap) @finding"

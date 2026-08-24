@@ -1,0 +1,27 @@
+# Taint profile for InterSystems ObjectScript (UDL grammar).
+#
+# lvn = local variable, gvn = global (^...), instance_variable = i%Var.
+identifiers: [lvn, gvn, instance_variable]
+
+assignments:
+  # SET target = expression
+  - query: "(set_argument (set_target) @lhs (expression) @rhs)"
+  - query: "(set_argument (set_target_list) @lhs (expression) @rhs)"
+
+functions:
+  - query: "(method_definition (method_name) @name) @function"
+
+params:
+  # Method Run(input As %String): the parameter name is the lvn inside the
+  # definition's argument list.
+  - query: "(method_definition (arguments (argument (method_arg (expression (lvn) @param)))))"
+
+calls:
+  # do ..Method(args) / set x = ..Method(args)
+  - query: "(relative_dot_method (oref_method (method_name) @callee (method_args) @args)) @call"
+  # routine-style: do Tag^ROUTINE(args) or do Tag(args)
+  - query: "(routine_tag_call) @call"
+
+returns:
+  - query: "(command_return (expression) @value)"
+  - query: "(command_quit (expression) @value)"

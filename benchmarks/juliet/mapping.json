@@ -1,0 +1,10 @@
+{
+  "_comment": "Maps Juliet CWE folders to the crit C# rule ids that target them. Only these CWEs are scored; CWEs with no mapped rule are reported as unmapped, not counted against crit.",
+  "CWE-89": ["cs.sql-injection"],
+  "CWE-78": ["cs.cmd-injection"],
+  "CWE-79": ["cs.xss.response-write"],
+  "CWE-22": ["cs.path-traversal"],
+  "CWE-327": ["cs.weak-crypto"],
+  "CWE-328": ["cs.weak-crypto"],
+  "CWE-798": ["cs.hardcoded-secret"]
+}

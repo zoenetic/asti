@@ -1,0 +1,48 @@
+# Additional code-quality rules for InterSystems ObjectScript.
+rules:
+  - id: os.quality.deprecated-zutil
+    severity: low
+    category: quality
+    languages: [objectscript]
+    message: "Legacy `$ZUTIL`/`$ZU` function is deprecated"
+    description: >
+      The $ZUTIL (and its abbreviation $ZU) legacy utility functions are
+      deprecated; their behaviors have been superseded by documented system
+      classes and configuration APIs.
+    remediation: >
+      Replace the $ZUTIL/$ZU call with the equivalent modern API (e.g.
+      %SYSTEM.* classes or the relevant configuration method).
+    metadata:
+      tags: [legacy, deprecated]
+    query: |
+      ((system_defined_function) @finding
+        (#match? @finding "(?i)^\\$zu(til)?\\("))
+
+  - id: os.quality.debug-zwrite
+    severity: info
+    category: quality
+    languages: [objectscript]
+    message: "Leftover `ZWRITE` debug output"
+    description: >
+      ZWRITE dumps variables to the current device and is almost always a
+      leftover debugging aid; it does not belong in production code.
+    remediation: Remove the ZWRITE, or replace it with intentional, structured logging.
+    metadata:
+      tags: [debug]
+    query: "(command_zwrite) @finding"
+
+  - id: os.quality.debug-break
+    severity: info
+    category: quality
+    languages: [objectscript]
+    message: "Leftover argumentless `BREAK` drops into the debugger"
+    description: >
+      An argumentless BREAK enters the interactive debugger / programmer
+      prompt and is leftover debugging code. (BREAK 0 / BREAK 1, which
+      toggle interrupt handling, are intentional and not flagged.)
+    remediation: Remove the BREAK before shipping.
+    metadata:
+      tags: [debug]
+    query: |
+      ((command_break) @finding
+        (#match? @finding "(?i)^break\\s*$"))

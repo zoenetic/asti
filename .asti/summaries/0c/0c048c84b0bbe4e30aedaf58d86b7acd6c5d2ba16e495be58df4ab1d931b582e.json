@@ -1,0 +1,1 @@
+{"schema":1,"file":"crates/asti-core/src/engine/taint/sinks.rs","content_hash":"d0e77061e7dc362e66b9313e0d3e1f1b7f7d9167fcf06f00f18c6418964f8497","bindings":{"module_decl":null,"imports":[],"exports":[]},"rules":{},"summary_hash":"8c782b4d3222cda9a7fb249c2db9bc2740f7fd3507a1b5b71a053db7aa03cefa"}

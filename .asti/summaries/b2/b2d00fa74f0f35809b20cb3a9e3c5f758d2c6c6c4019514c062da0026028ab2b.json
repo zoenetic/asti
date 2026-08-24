@@ -1,0 +1,1 @@
+{"schema":1,"file":"crates/asti-core/src/output/human.rs","content_hash":"1a404629ba27e1d5e7ec3baa533fa550eb2989642fe7805379b7383858590781","bindings":{"module_decl":null,"imports":[["_","std::fmt::Write","*"]],"exports":[]},"rules":{},"summary_hash":"967e1a585de0ced5f8d58dc7ac2b3c141823285b1e59c30decabdb1fc86aee30"}

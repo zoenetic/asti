@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = ["crates/crit-core", "crates/crit"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+# Set to the owning repository URL on handover. This drives the SARIF
+# `informationUri`/`helpUri` (see crit_core::PROJECT_URL).
+repository = "https://example.com/crit"
+authors = ["crit contributors"]
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+blake3 = "1"
+rayon = "1.10"
+ignore = "0.4"
+globset = "0.4"
+regex = "1"
+clap = { version = "4", features = ["derive", "wrap_help"] }
+owo-colors = { version = "4", features = ["supports-colors"] }
+libloading = "0.8"
+include_dir = "0.7"
+streaming-iterator = "0.1"
+toml = "0.8"
+tempfile = "3"
+
+tree-sitter = "0.26.6"
+tree-sitter-language = "0.1"
+tree-sitter-objectscript = "1.9"
+tree-sitter-pascal = "0.10"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-go = "0.25"
+tree-sitter-c-sharp = "0.23"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

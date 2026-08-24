@@ -1,0 +1,62 @@
+# Taint profile for TypeScript (superset of the JavaScript profile plus
+# typed parameter forms).
+identifiers: [identifier]
+
+assignments:
+  - query: "(assignment_expression left: (identifier) @lhs right: (_) @rhs)"
+  - query: "(augmented_assignment_expression left: (identifier) @lhs right: (_) @rhs)"
+  - query: "(variable_declarator name: (identifier) @lhs value: (_) @rhs)"
+
+functions:
+  - query: "(function_declaration name: (identifier) @name) @function"
+  - query: "(function_expression) @function"
+  - query: "(arrow_function) @function"
+  - query: "(method_definition name: (property_identifier) @name) @function"
+
+params:
+  - query: "(required_parameter pattern: (identifier) @param)"
+  - query: "(optional_parameter pattern: (identifier) @param)"
+
+calls:
+  - query: "(call_expression function: (identifier) @callee arguments: (arguments) @args) @call"
+
+returns:
+  - query: "(return_statement (_) @value)"
+
+# --- binding layer (0.2) ---
+member_access:
+  - query: "(member_expression object: (_) @object property: (property_identifier) @field) @access"
+
+method_calls:
+  - query: "(call_expression function: (member_expression object: (_) @receiver property: (property_identifier) @method) arguments: (arguments) @args) @call"
+
+imports:
+  - query: |
+      (import_statement
+        (import_clause (named_imports (import_specifier
+          name: (identifier) @name
+          alias: (identifier)? @alias)))
+        source: (string (string_fragment) @module))
+  - query: |
+      (variable_declarator
+        name: (object_pattern (shorthand_property_identifier_pattern) @name)
+        value: (call_expression
+          function: (identifier) @_req
+          arguments: (arguments (string (string_fragment) @module)))
+        (#eq? @_req "require"))
+  - query: |
+      (variable_declarator
+        name: (identifier) @alias
+        value: (call_expression
+          function: (identifier) @_req
+          arguments: (arguments (string (string_fragment) @module)))
+        (#eq? @_req "require"))
+
+exports:
+  - query: "(export_statement declaration: (function_declaration name: (identifier) @name))"
+  - query: "(export_statement (export_clause (export_specifier name: (identifier) @name)))"
+
+module_resolution:
+  strategy: path
+  extensions: [".tsx", ".ts", ".js", ".jsx"]
+  index_files: ["index.tsx", "index.ts"]

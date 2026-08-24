@@ -1,0 +1,1 @@
+{"schema":1,"file":"crates/asti-core/src/engine/taint/mod.rs","content_hash":"c5ed4b932b8a73b9a35247afcb4fa0538ef1d43bf3d6f6ee5d8b6ab641d5a28c","bindings":{"module_decl":null,"imports":[],"exports":[]},"rules":{},"summary_hash":"7fecde1ef86bb6a4d9dbdcc9c5babd253fd2a90ab3b386508a2fcf278a59baa5"}

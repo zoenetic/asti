@@ -1,0 +1,168 @@
+# File-access and outbound-network security rules for InterSystems
+# ObjectScript.
+#
+# Covers path traversal / unsafe file access (%File, %Stream.File*, the
+# OPEN/USE device commands) and server-side request forgery (SSRF) through
+# %Net.HttpRequest. Sources model CSP/REST request data (%request/%session)
+# and interactive READ input, matching profiles/objectscript.yaml.
+rules:
+  - id: os.path-traversal
+    kind: taint
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "User-controlled data flows into a filesystem path"
+    description: >
+      Data read from %request (CSP/REST input) or an interactive READ reaches
+      a filesystem API — ##class(%File).* , a %Stream.FileCharacter /
+      %Stream.FileBinary LinkToFile, or an OPEN/USE device — as the filename.
+      An attacker can supply "../" sequences or absolute paths to read or
+      write files outside the intended directory.
+    remediation: >
+      Canonicalize the path with ##class(%File).NormalizeFilename and confirm
+      it stays under an allowed base directory, or map the input through a
+      fixed allowlist of permitted files. Never pass raw request data as a
+      filename.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [SI-10, AC-3]
+      references:
+        - https://docs.intersystems.com/irislatest/csp/documatic/%25CSP.Documatic.cls?LIBRARY=%25SYS&CLASSNAME=%25Library.File
+    sources:
+      - label: HTTP request data (%request)
+        query: |
+          ((oref_chain_expr (lvn) @_obj) @source
+            (#any-of? @_obj "%request" "%session"))
+      - label: interactive READ input
+        query: "(command_read (read_argument (read_variable) @source))"
+    sinks:
+      - label: file/stream class method (filename argument)
+        query: |
+          ((class_method_call
+            (class_ref (class_name) @_c)
+            (method_args (method_arg) @sink))
+            (#any-of? @_c "%File" "%Library.File" "%Stream.FileCharacter"
+              "%Stream.FileBinary" "%FileCharacterStream" "%FileBinaryStream"))
+      - label: stream LinkToFile (filename argument)
+        query: |
+          ((oref_method
+            (method_name) @_m
+            (method_args (method_arg) @sink))
+            (#any-of? @_m "LinkToFile"))
+      - label: OPEN device (filename)
+        query: "(command_open (open_argument (device) @sink))"
+      - label: USE device (filename)
+        query: "(command_use (use_argument (device) @sink))"
+    sanitizers:
+      - query: |
+          ((class_method_call (method_name) @_m) @sanitizer
+            (#any-of? @_m "NormalizeFilename" "NormalizeFilenameWithSpaces"))
+      - query: |
+          ((oref_method (method_name) @_m) @sanitizer
+            (#any-of? @_m "NormalizeFilename" "NormalizeFilenameWithSpaces"))
+
+  - id: os.path-traversal.usage
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "Filesystem path built from a non-constant value"
+    description: >
+      A %File / %Stream.File* API, LinkToFile, or an OPEN/USE device receives
+      a computed (non-literal) path. Even without a proven taint flow, dynamic
+      filesystem paths are a path-traversal risk and warrant review.
+    remediation: >
+      Keep filesystem paths static where possible; otherwise canonicalize with
+      ##class(%File).NormalizeFilename and validate against an allowed base
+      directory before use.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [SI-10, AC-3]
+    query: |
+      (command_open (open_argument (device (expression) @val))) @finding
+      (command_use (use_argument (device (expression) @val))) @finding
+      ((class_method_call
+        (class_ref (class_name) @_c)
+        (method_args (method_arg (expression) @val))) @finding
+        (#any-of? @_c "%File" "%Library.File" "%Stream.FileCharacter"
+          "%Stream.FileBinary" "%FileCharacterStream" "%FileBinaryStream"))
+      ((oref_method
+        (method_name) @_m
+        (method_args (method_arg (expression) @val))) @finding
+        (#any-of? @_m "LinkToFile"))
+    filters:
+      - capture: val
+        pattern: '^"'
+        negate: true
+
+  - id: os.ssrf
+    kind: taint
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "User-controlled data flows into an outbound HTTP request host"
+    description: >
+      Request-derived data is assigned to the Server / Host / Location of a
+      %Net.HttpRequest (or passed as the target of a Get/Post/Send). The
+      application will then issue an outbound request to an attacker-chosen
+      host — server-side request forgery, which can reach internal services
+      and cloud metadata endpoints.
+    remediation: >
+      Resolve the destination from a fixed allowlist of permitted hosts rather
+      than from request input; reject internal/link-local addresses before
+      issuing the request.
+    metadata:
+      cwe: [CWE-918]
+      owasp: ["A10:2021"]
+      nist: [SI-10, SC-7]
+      references:
+        - https://docs.intersystems.com/irislatest/csp/documatic/%25CSP.Documatic.cls?LIBRARY=%25SYS&CLASSNAME=%25Net.HttpRequest
+    sources:
+      - label: HTTP request data (%request)
+        query: |
+          ((oref_chain_expr (lvn) @_obj) @source
+            (#any-of? @_obj "%request" "%session"))
+      - label: interactive READ input
+        query: "(command_read (read_argument (read_variable) @source))"
+    sinks:
+      - label: HTTP request host property (Server/Host/Location)
+        query: |
+          ((set_argument
+            (set_target (oref_chain_expr (oref_chain_segment
+              (oref_property (property_name) @_p))))
+            (expression) @sink)
+            (#any-of? @_p "Server" "Host" "Location"))
+      - label: outbound HTTP request target (Get/Post/Send)
+        query: |
+          ((oref_method
+            (method_name) @_m
+            (method_args (method_arg) @sink))
+            (#any-of? @_m "Get" "Post" "Send" "Put" "Delete"))
+
+  - id: os.ssrf.usage
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "Outbound HTTP host set from a non-constant value"
+    description: >
+      The Server / Host / Location of an HTTP request is assigned a computed
+      (non-literal) value. Dynamic outbound destinations are an SSRF risk even
+      without a proven taint flow and should be reviewed.
+    remediation: >
+      Restrict outbound destinations to a fixed allowlist of hosts and reject
+      internal or link-local addresses before issuing the request.
+    metadata:
+      cwe: [CWE-918]
+      owasp: ["A10:2021"]
+      nist: [SI-10, SC-7]
+    query: |
+      ((set_argument
+        (set_target (oref_chain_expr (oref_chain_segment
+          (oref_property (property_name) @_p))))
+        (expression) @val) @finding
+        (#any-of? @_p "Server" "Host" "Location"))
+    filters:
+      - capture: val
+        pattern: '^"'
+        negate: true

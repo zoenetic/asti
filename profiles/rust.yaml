@@ -1,0 +1,34 @@
+# Taint profile for Rust.
+identifiers: [identifier]
+
+assignments:
+  - query: "(let_declaration pattern: (identifier) @lhs value: (_) @rhs)"
+  - query: "(assignment_expression left: (identifier) @lhs right: (_) @rhs)"
+
+functions:
+  - query: "(function_item name: (identifier) @name) @function"
+  - query: "(closure_expression) @function"
+
+params:
+  - query: "(parameter pattern: (identifier) @param)"
+
+calls:
+  - query: "(call_expression function: (identifier) @callee arguments: (arguments) @args) @call"
+
+returns:
+  - query: "(return_expression (_) @value)"
+
+# --- binding layer (0.2) ---
+member_access:
+  - query: "(field_expression value: (_) @object field: (field_identifier) @field) @access"
+
+method_calls:
+  - query: "(call_expression function: (field_expression value: (_) @receiver field: (field_identifier) @method) arguments: (arguments) @args) @call"
+
+imports:
+  # use std::process::Command as Cmd;  (external-crate identity, best-effort)
+  - query: "(use_declaration argument: (use_as_clause path: (scoped_identifier) @module (identifier) @alias))"
+
+module_resolution:
+  strategy: symbol
+  extensions: [".rs"]

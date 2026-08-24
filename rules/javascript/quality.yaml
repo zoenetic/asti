@@ -1,0 +1,40 @@
+# Code quality rules for JavaScript / TypeScript.
+rules:
+  - id: js.quality.debugger
+    severity: low
+    category: quality
+    languages: [javascript, typescript, tsx]
+    message: "Leftover `debugger` statement"
+    remediation: Remove debugger statements before committing.
+    metadata:
+      cwe: [CWE-489]
+    query: "(debugger_statement) @finding"
+
+  - id: js.quality.empty-catch
+    severity: low
+    category: quality
+    languages: [javascript, typescript, tsx]
+    message: "Empty catch block silently swallows errors"
+    description: >
+      Swallowed exceptions hide failures and make production issues hard to
+      diagnose.
+    remediation: Handle the error, rethrow it, or log it with context.
+    metadata:
+      cwe: [CWE-390]
+    query: |
+      (catch_clause
+        body: (statement_block) @body
+        (#eq? @body "{}")) @finding
+
+  - id: js.quality.console-log
+    severity: info
+    category: quality
+    languages: [javascript, typescript, tsx]
+    message: "console.${method} call left in code"
+    query: |
+      (call_expression
+        function: (member_expression
+          object: (identifier) @obj
+          property: (property_identifier) @method)
+        (#eq? @obj "console")
+        (#any-of? @method "log" "debug" "trace")) @finding

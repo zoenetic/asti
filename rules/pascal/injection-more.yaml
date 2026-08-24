@@ -1,0 +1,141 @@
+# Additional injection / misuse rules for Pascal / Delphi.
+rules:
+  # ---------------------------------------------------------------------------
+  # 1. Format-string vulnerability (CWE-134)
+  # ---------------------------------------------------------------------------
+  - id: pas.format-string
+    kind: taint
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "User-controlled data used as a format string"
+    description: >
+      External input (command line, environment, or HTTP request objects)
+      reaches the format-string argument of Format/WideFormat/FmtStr. An
+      attacker-controlled format string can crash the process or leak/overwrite
+      memory via directives such as %s / %p / %n.
+    remediation: >
+      Keep the format string a constant literal and pass user data only in the
+      arguments array, e.g. Format('%s', [userInput]).
+    metadata:
+      cwe: [CWE-134]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: command line / environment
+        query: |
+          ((exprCall entity: (identifier) @_f) @source
+            (#any-of? @_f "ParamStr" "GetEnvironmentVariable"))
+      - label: HTTP request field
+        query: |
+          ((exprDot) @source
+            (#match? @source "(?i)^(a?request|req)\\.(query|content|form)fields"))
+    sinks:
+      - label: format-string argument
+        query: |
+          ((exprCall entity: (identifier) @_f args: (exprArgs . (_) @sink))
+            (#match? @_f "(?i)^(Format|WideFormat|FmtStr)$"))
+
+  - id: pas.format-string.usage
+    severity: medium
+    category: security
+    languages: [pascal]
+    message: "Non-literal format string passed to `${callee}`"
+    description: >
+      The first argument of Format/WideFormat/FmtStr is a dynamic value rather
+      than a constant literal. If any part of it is externally influenced this
+      is a format-string vulnerability.
+    remediation: >
+      Use a constant literal format string and pass dynamic data in the
+      arguments array.
+    metadata:
+      cwe: [CWE-134]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    query: |
+      ((exprCall entity: (identifier) @callee args: (exprArgs . (identifier) @arg)) @finding
+        (#match? @callee "(?i)^(Format|WideFormat|FmtStr)$"))
+
+  # ---------------------------------------------------------------------------
+  # 2. Path traversal (CWE-22)
+  # ---------------------------------------------------------------------------
+  - id: pas.path-traversal
+    kind: taint
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "External input flows into a file path"
+    description: >
+      External input (command line, environment, or HTTP request objects)
+      reaches a file-opening API (TFileStream.Create, AssignFile/Reset/Rewrite,
+      TFile.*, LoadFromFile/SaveToFile) without validation, allowing directory
+      traversal outside the intended folder (e.g. ../../etc/passwd).
+    remediation: >
+      Canonicalize and validate the path against an allowlisted base directory;
+      strip directory components with ExtractFileName before use.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [AC-3]
+    sources:
+      - label: command line / environment
+        query: |
+          ((exprCall entity: (identifier) @_f) @source
+            (#any-of? @_f "ParamStr" "GetEnvironmentVariable"))
+      - label: HTTP request field
+        query: |
+          ((exprDot) @source
+            (#match? @source "(?i)^(a?request|req)\\.(query|content|form)fields"))
+    sanitizers:
+      - label: strip directory components
+        query: |
+          ((exprCall entity: (identifier) @_f) @sanitizer
+            (#match? @_f "(?i)^(ExtractFileName)$"))
+    sinks:
+      - label: file open / read / write
+        query: |
+          ((exprCall entity: (_) @_f args: (exprArgs (_) @sink))
+            (#match? @_f "(?i)(TFileStream\\.Create$)|(TFile\\.[A-Za-z]+$)|(\\.(LoadFromFile|SaveToFile)$)|(^(AssignFile|Reset|Rewrite)$)"))
+
+  - id: pas.path-traversal.usage
+    severity: medium
+    category: security
+    languages: [pascal]
+    message: "File access via `${entity}` — validate the path"
+    description: >
+      A file-system API is invoked with a caller-supplied path. Any dynamic
+      component must be validated against an allowlisted base directory to
+      prevent path traversal.
+    remediation: >
+      Validate/canonicalize the path and confine it to an intended directory;
+      strip directory components with ExtractFileName.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [AC-3]
+    query: |
+      ((exprCall entity: (_) @entity) @finding
+        (#match? @entity "(?i)(TFileStream\\.Create$)|(TFile\\.[A-Za-z]+$)|(\\.(LoadFromFile|SaveToFile)$)|(^AssignFile$)"))
+
+  # ---------------------------------------------------------------------------
+  # 3. Insecure randomness for security (CWE-330)
+  # ---------------------------------------------------------------------------
+  - id: pas.insecure-random
+    severity: medium
+    category: security
+    languages: [pascal]
+    message: "Non-cryptographic RNG `${name}` used"
+    description: >
+      Random / Randomize use a fast, predictable pseudo-random generator that
+      is not a CSPRNG. Values derived from it (tokens, passwords, session ids,
+      nonces, salts) are guessable.
+    remediation: >
+      For security-sensitive values use a cryptographic RNG such as
+      System.Hash / TRandomGenerator over CryptGenRandom, or the OS CSPRNG.
+    metadata:
+      cwe: [CWE-330]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+    query: |
+      ((identifier) @name @finding
+        (#match? @name "(?i)^(Random|Randomize)$"))

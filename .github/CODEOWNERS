@@ -1,0 +1,10 @@
+# Code ownership. On GitHub, listed owners are auto-requested for review.
+#
+# NOTE: Azure DevOps ignores this file. On the internal ADO home, configure
+# required reviewers via branch policies on `main` instead.
+#
+# Replace the placeholder below with the owning team on handover.
+
+*                 @OWNER/crit-maintainers
+/rules/           @OWNER/crit-maintainers
+/crates/crit-core/src/engine/   @OWNER/crit-maintainers

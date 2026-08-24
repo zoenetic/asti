@@ -1,0 +1,194 @@
+# Security rules for C# / .NET.
+rules:
+  - id: cs.sql-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [csharp]
+    message: "User-controlled data flows into a SQL command"
+    description: >
+      Request-derived data reaches a SqlCommand constructor, CommandText
+      assignment, or raw-SQL EF call, enabling SQL injection.
+    remediation: >
+      Use parameterized commands (SqlParameter, EF interpolated
+      FromSql/ExecuteSql overloads); never concatenate input into SQL text.
+    metadata:
+      cwe: [CWE-89]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_access_expression) @source
+            (#match? @source "^(HttpContext\\.)?Request\\.(QueryString|Form|Params|Headers|Cookies|Query|RouteValues|RawUrl)$"))
+      - label: console input
+        query: |
+          ((invocation_expression function: (member_access_expression) @_f) @source
+            (#eq? @_f "Console.ReadLine"))
+    sinks:
+      - label: SQL command construction
+        query: |
+          ((object_creation_expression
+            type: (identifier) @_type
+            arguments: (argument_list . (argument) @sink))
+            (#any-of? @_type
+              "SqlCommand" "OleDbCommand" "OdbcCommand" "MySqlCommand"
+              "NpgsqlCommand" "SqliteCommand" "SQLiteCommand"))
+      - label: CommandText assignment
+        query: |
+          ((assignment_expression
+            left: (member_access_expression name: (identifier) @_prop)
+            right: (_) @sink)
+            (#eq? @_prop "CommandText"))
+      - label: raw SQL execution
+        query: |
+          ((invocation_expression
+            function: (member_access_expression name: (identifier) @_m)
+            arguments: (argument_list . (argument) @sink))
+            (#any-of? @_m "ExecuteSqlRaw" "ExecuteSqlRawAsync" "FromSqlRaw" "SqlQuery"))
+
+  - id: cs.cmd-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [csharp]
+    message: "User-controlled data reaches Process.Start"
+    description: >
+      Request-derived data flows into Process.Start or ProcessStartInfo,
+      allowing OS command injection.
+    remediation: >
+      Keep FileName static, pass user data via ArgumentList, and set
+      UseShellExecute = false.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_access_expression) @source
+            (#match? @source "^(HttpContext\\.)?Request\\.(QueryString|Form|Params|Headers|Cookies|Query|RouteValues|RawUrl)$"))
+      - label: console input
+        query: |
+          ((invocation_expression function: (member_access_expression) @_f) @source
+            (#eq? @_f "Console.ReadLine"))
+    sinks:
+      - label: process launch
+        query: |
+          ((invocation_expression
+            function: (member_access_expression) @_f
+            arguments: (argument_list (argument) @sink))
+            (#eq? @_f "Process.Start"))
+      # Identity-resolved by the Process receiver (robustness alongside the
+      # text query; matches Process.Start regardless of surrounding syntax).
+      - label: process launch
+        resolved: { module: Process, name: Start }
+
+  - id: cs.xss.response-write
+    kind: taint
+    severity: high
+    category: security
+    languages: [csharp]
+    message: "User-controlled data written to the HTTP response without encoding"
+    remediation: HTML-encode with HttpUtility.HtmlEncode / WebUtility.HtmlEncode first.
+    metadata:
+      cwe: [CWE-79]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_access_expression) @source
+            (#match? @source "^(HttpContext\\.)?Request\\.(QueryString|Form|Params|Headers|Cookies|Query|RouteValues|RawUrl)$"))
+    sinks:
+      - label: Response.Write
+        query: |
+          ((invocation_expression
+            function: (member_access_expression) @_f
+            arguments: (argument_list . (argument) @sink))
+            (#eq? @_f "Response.Write"))
+    sanitizers:
+      - query: |
+          ((invocation_expression function: (member_access_expression) @_f) @sanitizer
+            (#match? @_f "^(HttpUtility|WebUtility)\\.(HtmlEncode|UrlEncode)$"))
+
+  - id: cs.path-traversal
+    kind: taint
+    severity: high
+    category: security
+    languages: [csharp]
+    message: "User-controlled data is used as a filesystem path"
+    remediation: >
+      Combine with a fixed base directory via Path.Combine and verify
+      Path.GetFullPath stays inside it, or map input to known names.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [AC-3, SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_access_expression) @source
+            (#match? @source "^(HttpContext\\.)?Request\\.(QueryString|Form|Params|Headers|Cookies|Query|RouteValues|RawUrl)$"))
+    sinks:
+      - label: file access
+        query: |
+          ((invocation_expression
+            function: (member_access_expression) @_f
+            arguments: (argument_list . (argument) @sink))
+            (#match? @_f "^File\\.(ReadAllText|ReadAllBytes|ReadAllLines|WriteAllText|WriteAllBytes|Open|OpenRead|OpenWrite|Delete|Copy|Move)$"))
+    sanitizers:
+      - query: |
+          ((invocation_expression function: (member_access_expression) @_f) @sanitizer
+            (#eq? @_f "Path.GetFileName"))
+
+  - id: cs.weak-crypto
+    severity: medium
+    category: security
+    languages: [csharp]
+    message: "Weak cryptographic algorithm `${algo}`"
+    description: MD5, SHA-1, DES, TripleDES and RC2 are broken or obsolete.
+    remediation: Use SHA-256+ for hashing and AES-GCM for encryption; for passwords use PBKDF2/argon2.
+    metadata:
+      cwe: [CWE-327, CWE-328]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+    query: |
+      ((invocation_expression
+        function: (member_access_expression) @algo)
+        (#match? @algo "^(MD5|SHA1|DES|TripleDES|RC2|MD5CryptoServiceProvider)\\.Create$")) @finding
+
+  - id: cs.hardcoded-secret
+    severity: high
+    category: security
+    languages: [csharp]
+    message: "Possible hardcoded secret in `${name}`"
+    remediation: >
+      Use user-secrets/environment configuration or a vault; rotate any
+      committed credential.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      (variable_declarator
+        name: (identifier) @name
+        (string_literal) @value) @finding
+    filters:
+      - capture: name
+        pattern: "(?i)(password|passwd|secret|api_?key|auth_?token|private_?key|access_?key|connection_?string)"
+      - capture: value
+        pattern: ".{8,}"
+
+  - id: cs.quality.empty-catch
+    severity: low
+    category: quality
+    languages: [csharp]
+    message: "Empty catch block silently swallows exceptions"
+    remediation: Handle, log, or rethrow the exception.
+    metadata:
+      cwe: [CWE-390]
+    query: |
+      (catch_clause
+        body: (block) @body
+        (#eq? @body "{}")) @finding

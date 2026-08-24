@@ -1,0 +1,125 @@
+# Crypto & network security rules for Pascal / Delphi.
+rules:
+  - id: pas.insecure-tls
+    severity: critical
+    category: security
+    languages: [pascal]
+    message: "TLS certificate validation weakened or disabled"
+    description: >
+      Indy/SSL peer verification is disabled: an SSL VerifyMode set to a
+      permissive value (sslvrfNone), a VerifyCert/ValidateCert flag turned
+      off, or an OnVerifyPeer-style handler (TIdX509 argument) that returns
+      True unconditionally. Any of these accepts forged or invalid
+      certificates, enabling man-in-the-middle attacks.
+    remediation: >
+      Require peer verification (e.g. VerifyMode := [sslvrfPeer,
+      sslvrfFailIfNoPeerCert]) and validate the certificate chain, hostname,
+      and expiry in OnVerifyPeer.
+    metadata:
+      cwe: [CWE-295]
+      owasp: ["A02:2021"]
+      nist: [SC-8]
+    query: |
+      ((assignment lhs: (exprDot) @_t rhs: (_) @_v) @finding
+        (#match? @_t "(?i)\.(ssl)?verifymode$")
+        (#match? @_v "(?i)sslvrfnone"))
+      ((assignment lhs: (exprDot) @_t rhs: (_) @_v) @finding
+        (#match? @_t "(?i)\.(verifycert|validatecert|checkcertificate)$")
+        (#match? @_v "(?i)^(false|off|0)$"))
+      ((defProc
+          header: (declProc args: (declArgs (declArg type: (type (typeref (identifier) @_ct)))))
+          body: (block (assignment lhs: (identifier) @_r rhs: (kTrue)))) @finding
+        (#match? @_ct "(?i)x509")
+        (#match? @_r "(?i)^result$"))
+
+  - id: pas.hardcoded-crypto-key
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "Hardcoded cryptographic key/IV/password"
+    description: >
+      A string literal is assigned directly to a .Key, .IV, or .Password
+      property. Embedded key material can be extracted from the binary and
+      cannot be rotated without a code change.
+    remediation: >
+      Derive keys from a secret manager or KDF at runtime; never commit key
+      material to source.
+    metadata:
+      cwe: [CWE-321]
+      owasp: ["A02:2021"]
+      nist: [IA-5, SC-12]
+    query: |
+      (assignment
+        lhs: (exprDot) @target
+        rhs: (literalString) @value) @finding
+    filters:
+      - capture: target
+        pattern: "(?i)\\.(key|iv|password|passphrase)$"
+      - capture: value
+        pattern: ".{4,}"
+
+  - id: pas.weak-cipher-mode
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "Weak cipher or insecure cipher mode"
+    description: >
+      Use of a broken cipher (DES/3DES/RC2/RC4) or the ECB block-cipher mode.
+      ECB leaks plaintext structure; DES/RC4 are cryptographically broken.
+    remediation: >
+      Use AES-256 in an authenticated mode (GCM) or CBC with a random IV and
+      a MAC.
+    metadata:
+      cwe: [CWE-327]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+    query: |
+      ((exprCall entity: (_) @_f) @finding
+        (#match? @_f "(?i)(^|\.|_)(des|3des|tripledes|rc4|rc2)(encrypt|decrypt|init|\.|$)"))
+      ((assignment lhs: (exprDot) @_t rhs: (_) @_v) @finding
+        (#match? @_t "(?i)\.(ciphermode|mode)$")
+        (#match? @_v "(?i)ecb"))
+
+  - id: pas.dll-hijack
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "Library loaded by bare/relative name via `${_f}`"
+    description: >
+      LoadLibrary/LoadPackage is called with a bare or relative library name
+      (no absolute path). Windows resolves such names through its search
+      order, allowing an attacker-planted DLL/BPL to be loaded (DLL hijack).
+    remediation: >
+      Pass a fully-qualified path (e.g. from GetSystemDirectory) and/or call
+      SetDllDirectory('') to harden the search path.
+    metadata:
+      cwe: [CWE-427]
+      owasp: ["A05:2021"]
+      nist: [SI-10]
+    query: |
+      ((exprCall entity: (identifier) @_f args: (exprArgs (literalString) @path)) @finding
+        (#match? @_f "(?i)^(LoadLibrary|LoadPackage|LoadLibraryEx)$")
+        (#not-match? @path "[/\\\\:]"))
+
+  - id: pas.unsafe-deserialization
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "Unsafe component deserialization via `${_f}`"
+    description: >
+      ReadComponent/ReadComponentRes(File) reconstructs objects from a stream,
+      instantiating arbitrary published component classes and setting their
+      properties. On attacker-controlled data this enables object-injection
+      style attacks.
+    remediation: >
+      Only deserialize trusted data; validate the stream source and restrict
+      the set of allowed classes.
+    metadata:
+      cwe: [CWE-502]
+      owasp: ["A08:2021"]
+      nist: [SI-10]
+    query: |
+      ((exprCall entity: (exprDot) @_f) @finding
+        (#match? @_f "(?i)\.readcomponent(res|resfile)?$"))
+      ((exprCall entity: (identifier) @_f) @finding
+        (#match? @_f "(?i)^readcomponent(res|resfile)?$"))

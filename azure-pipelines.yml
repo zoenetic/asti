@@ -1,0 +1,47 @@
+# Azure DevOps pipeline mirroring .github/workflows/ci.yml, for the internal
+# ADO home. Keeps the same gates: format, clippy, tests, release build, the
+# per-rule verification gate, coverage, and the Juliet harness smoke test.
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  CARGO_TERM_COLOR: always
+
+steps:
+  - script: |
+      rustup update stable
+      rustup default stable
+      rustup component add rustfmt clippy
+    displayName: Install Rust toolchain
+
+  - script: cargo fmt --all -- --check
+    displayName: Format check
+
+  - script: cargo clippy --all-targets -- -D warnings
+    displayName: Clippy (warnings are errors)
+
+  - script: cargo test --release
+    displayName: Unit & integration tests
+
+  - script: cargo build --release
+    displayName: Build release binary
+
+  # Rule-validation gate: every rule's per-rule fixtures must verify — each
+  # crit:expect fires, each crit:expect-not stays silent, and no finding lands
+  # on an unannotated line.
+  - script: ./target/release/crit rules verify
+    displayName: Verify rules against per-rule fixtures
+
+  - script: ./target/release/crit coverage
+    displayName: Taxonomy coverage report
+
+  # Full NIST Juliet corpus is downloaded separately (see
+  # benchmarks/juliet/README.md); CI only smoke-tests the scorer on the sample.
+  - script: python3 benchmarks/juliet/score.py benchmarks/juliet/sample
+    displayName: Juliet benchmark harness smoke test

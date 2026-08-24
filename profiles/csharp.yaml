@@ -1,0 +1,36 @@
+# Taint profile for C#.
+identifiers: [identifier]
+
+assignments:
+  - query: "(assignment_expression left: (identifier) @lhs right: (_) @rhs)"
+  - query: "(variable_declarator name: (identifier) @lhs (_) @rhs)"
+
+functions:
+  - query: "(method_declaration name: (identifier) @name) @function"
+  - query: "(local_function_statement name: (identifier) @name) @function"
+  - query: "(constructor_declaration name: (identifier) @name) @function"
+  - query: "(lambda_expression) @function"
+
+params:
+  - query: "(parameter name: (identifier) @param)"
+
+calls:
+  - query: "(invocation_expression function: (identifier) @callee arguments: (argument_list) @args) @call"
+
+returns:
+  - query: "(return_statement (_) @value)"
+
+# --- binding layer (0.2) ---
+member_access:
+  - query: "(member_access_expression expression: (_) @object name: (identifier) @field) @access"
+
+method_calls:
+  - query: "(invocation_expression function: (member_access_expression expression: (_) @receiver name: (identifier) @method) arguments: (argument_list) @args) @call"
+
+# C# `using` imports namespaces, not symbols, and type calls like
+# `Process.Start` already resolve as member accesses (base == "Process"), so no
+# import section is needed for identity matching here.
+
+module_resolution:
+  strategy: symbol
+  extensions: [".cs"]

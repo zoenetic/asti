@@ -1,0 +1,1 @@
+{"schema":1,"file":"crates/asti-core/tests/fixtures/javascript/safe.js","content_hash":"a4eeff0163d51888aaf20d216014f201bb8551d5f33a75979601bc301eee61b1","bindings":{"module_decl":null,"imports":[["express","express","*"],["db","./db","*"]],"exports":[]},"rules":{},"summary_hash":"6a72bc969d925929576bd448c05ed7d34fbceca5be3b20b32f6b04430b5fa9d7"}

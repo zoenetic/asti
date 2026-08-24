@@ -1,0 +1,156 @@
+# Access-control & cryptography rules for InterSystems ObjectScript.
+#
+# Covers weak/misused cryptography, hardcoded encryption keys, hardcoded
+# credentials passed to security APIs, sensitive data written to log/audit
+# globals, and dangerous privileged/system calls ($ZU/$ZUTIL, %SYSTEM.Process,
+# %SYSTEM.Security). Grammar node kinds verified with `crit parse`:
+#   $System.Encryption.MD5Hash(...)      -> system_defined_function
+#   ##class(%SYSTEM.Security).Login(...) -> class_method_call
+#   $ZU(...) / $ZUTIL(...)               -> system_defined_function (no method_name)
+rules:
+  - id: os.weak-crypto
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "Weak cryptographic function `${m}`"
+    description: >
+      $System.Encryption exposes MD5 and SHA-1 hashing. Both are
+      cryptographically broken and unsuitable for integrity, signatures, or
+      password storage.
+    remediation: >
+      Use SHAHash with a 256/384/512 bit length (e.g.
+      $System.Encryption.SHAHash(256, data)); for passwords use a salted
+      PBKDF2/scrypt/argon2 KDF rather than a bare hash.
+    metadata:
+      cwe: [CWE-327, CWE-328]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+      references:
+        - https://docs.intersystems.com/irislatest/csp/documatic/%25CSP.Documatic.cls?LIBRARY=%25SYS&CLASSNAME=%25SYSTEM.Encryption
+    query: |
+      ((system_defined_function
+        (method_name) @m) @finding
+        (#any-of? @m "MD5Hash" "SHA1Hash"))
+
+  - id: os.hardcoded-crypto-key
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "Hardcoded encryption key/IV passed to `${m}`"
+    description: >
+      A string-literal key is passed as the second argument to an
+      $System.Encryption AES routine. Embedding key material in source lets
+      anyone with read access to the code (or VCS history) decrypt protected
+      data.
+    remediation: >
+      Load keys from a managed key store (e.g. %SYSTEM.Encryption key files or
+      an external KMS) and never commit key material; rotate any leaked key.
+    metadata:
+      cwe: [CWE-321, CWE-798]
+      owasp: ["A02:2021"]
+      nist: [SC-13, IA-5]
+    query: |
+      ((system_defined_function
+        (method_name) @m
+        (method_args
+          (method_arg)
+          (method_arg (expression (string_literal) @key)))) @finding
+        (#match? @m "(?i)Encrypt|Decrypt"))
+
+  - id: os.hardcoded-credential
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "Hardcoded credential passed to `${m}`"
+    description: >
+      A string-literal password is passed to a security authentication call
+      such as %SYSTEM.Security.Login or $System.Security.Login. Hardcoded
+      credentials cannot be rotated and leak through source control.
+    remediation: >
+      Read credentials from IRIS managed credential storage or protected
+      configuration and pass them at runtime; rotate any committed secret.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      ((class_method_call
+        (method_name) @m
+        (method_args
+          (method_arg)
+          (method_arg (expression (string_literal) @pw)))) @finding
+        (#eq? @m "Login"))
+
+  - id: os.hardcoded-credential.sysfunc
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "Hardcoded credential passed to `${m}`"
+    description: >
+      A string-literal password is passed to $System.Security.Login
+      (parsed as a system function reference). Hardcoded credentials cannot be
+      rotated and leak through source control.
+    remediation: >
+      Read credentials from IRIS managed credential storage or protected
+      configuration and pass them at runtime; rotate any committed secret.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      ((system_defined_function
+        (method_name) @m
+        (method_args
+          (method_arg)
+          (method_arg (expression (string_literal) @pw)))) @finding
+        (#eq? @m "Login"))
+
+  - id: os.sensitive-data-log
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "Sensitive value `${val}` written to log/audit global `^${g}`"
+    description: >
+      A variable whose name suggests a secret is stored into a persistent
+      log/audit/history global. Credentials, tokens, and other sensitive data
+      written to logs are exposed to anyone who can read those globals.
+    remediation: >
+      Never log secrets. Redact or omit sensitive fields before writing to
+      audit/log globals, and restrict read access to log storage.
+    metadata:
+      cwe: [CWE-532]
+      owasp: ["A09:2021"]
+      nist: [AU-9]
+    query: |
+      (set_argument
+        (set_target (gvn (identifier) @g))
+        (expression (lvn) @val)) @finding
+    filters:
+      - capture: g
+        pattern: "(?i)(log|audit|trace|debug|history)"
+      - capture: val
+        pattern: "(?i)(password|passwd|secret|token|api_?key|apikey|private_?key|ssn|creditcard)"
+
+  - id: os.privileged-call
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "Privileged/system call — review for least privilege"
+    description: >
+      $ZU/$ZUTIL are undocumented low-level system entry points, and
+      %SYSTEM.Process / %SYSTEM.Security class methods change process state and
+      security context. Their use should be justified and minimized.
+    remediation: >
+      Prefer documented, supported APIs; run with the least privilege
+      required and audit any process/security state changes.
+    metadata:
+      cwe: [CWE-269, CWE-250, CWE-272]
+      owasp: ["A04:2021"]
+      nist: [AC-6, CM-7]
+    query: |
+      ((system_defined_function) @finding
+        (#match? @finding "(?i)^\\$zu(til)?\\("))
+      ((class_method_call
+        (class_ref (class_name) @_c)
+        (method_name)) @finding
+        (#match? @_c "(?i)^%SYSTEM\\.(Process|Security)$"))

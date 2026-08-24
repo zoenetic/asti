@@ -1,0 +1,43 @@
+# crit configuration. Copy to `crit.toml` at your repository root.
+# Everything here is optional; CLI flags override these settings.
+
+[scan]
+# Extra rule files/directories (relative to this file), loaded after the
+# built-in packs. Later rules with the same id override earlier ones.
+rules = ["security/crit-rules"]
+
+# Disable the built-in rule packs and use only your own.
+# no_default_rules = true
+
+# Severity that makes `crit scan` exit non-zero (info|low|medium|high|
+# critical|never). Default: high.
+fail_on = "high"
+
+# Skip files larger than this many bytes (default 2 MiB).
+max_file_size = 2097152
+
+# Extra ignore globs (in addition to .gitignore/.critignore).
+exclude = ["vendor/**", "**/*.min.js", "third_party/**"]
+
+# If set, ONLY paths matching these globs are scanned.
+# include = ["src/**"]
+
+# Rule ids to turn off entirely.
+disable_rules = ["js.quality.console-log"]
+
+# Map file extensions to a specific language. Useful when an extension is
+# ambiguous — e.g. `.inc` is an ObjectScript include by default but a Pascal
+# include in a Delphi codebase.
+[extensions]
+inc = "pascal"
+
+# Load an externally compiled tree-sitter grammar at runtime. The library
+# must export `tree_sitter_<name>` (or set `symbol`). Provide a taint
+# profile (see profiles/*.yaml) to enable taint rules for it.
+# [[grammars]]
+# name = "sql"
+# library = "grammars/libtree-sitter-sql.so"
+# extensions = ["sql"]
+# display_name = "SQL"
+# profile = "profiles/sql.yaml"
+# symbol = "tree_sitter_sql"     # optional; defaults to tree_sitter_<name>

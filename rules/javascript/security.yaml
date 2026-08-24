@@ -1,0 +1,304 @@
+# Security rules for JavaScript / TypeScript.
+rules:
+  - id: js.code-injection.eval
+    name: eval-usage
+    severity: high
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "`${callee}` executes dynamically constructed code"
+    description: >
+      Passing strings to eval() or new Function() executes arbitrary code in
+      the current context. If any part of the string is attacker-influenced
+      this is remote code execution.
+    remediation: >
+      Avoid eval entirely. Use JSON.parse for data, lookup tables for dynamic
+      behavior, or well-scoped template engines.
+    metadata:
+      cwe: [CWE-95]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+      references:
+        - https://owasp.org/Top10/A03_2021-Injection/
+    query: |
+      (call_expression
+        function: (identifier) @callee
+        (#any-of? @callee "eval" "Function")) @finding
+
+  - id: js.code-injection.eval-taint
+    kind: taint
+    severity: critical
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "User-controlled data reaches eval()"
+    description: >
+      Data from an HTTP request or the environment flows into eval() or
+      new Function(), allowing arbitrary code execution.
+    remediation: Never pass request-derived data to eval or Function.
+    metadata:
+      cwe: [CWE-95]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(req|request)\\.(query|body|params|headers|cookies)"))
+      - label: process arguments / environment
+        query: |
+          ((member_expression) @source
+            (#match? @source "^process\\.(argv|env)"))
+      - label: browser location
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(window\\.)?(location|document\\.URL|document\\.location)"))
+    sinks:
+      - label: eval / Function
+        query: |
+          (call_expression
+            function: (identifier) @callee
+            arguments: (arguments (_) @sink)
+            (#any-of? @callee "eval" "Function"))
+      # Identity-resolved code execution via the `vm` module, including
+      # aliased/namespaced imports.
+      - label: vm code execution
+        resolved: { module: vm, name: runInContext, arg_index: 0 }
+      - label: vm code execution
+        resolved: { module: vm, name: runInNewContext, arg_index: 0 }
+      - label: vm code execution
+        resolved: { module: vm, name: compileFunction, arg_index: 0 }
+    sanitizers:
+      - query: |
+          ((call_expression
+            function: (identifier) @fn) @sanitizer
+            (#any-of? @fn "parseInt" "Number" "parseFloat"))
+
+  - id: js.sql-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "User-controlled data flows into a SQL query"
+    description: >
+      Request-derived data reaches a query()/execute() call. Building SQL by
+      string concatenation allows attackers to alter the query (SQL
+      injection).
+    remediation: >
+      Use parameterized queries / prepared statements; pass user data as
+      bound parameters, never as query text.
+    metadata:
+      cwe: [CWE-89]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+      references:
+        - https://cwe.mitre.org/data/definitions/89.html
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(req|request)\\.(query|body|params|headers|cookies)"))
+      - label: process arguments / environment
+        query: |
+          ((member_expression) @source
+            (#match? @source "^process\\.(argv|env)"))
+    sinks:
+      - label: SQL query execution
+        query: |
+          (call_expression
+            function: (member_expression
+              property: (property_identifier) @method)
+            arguments: (arguments . (_) @sink)
+            (#any-of? @method "query" "execute" "run" "all" "get" "exec"))
+    sanitizers:
+      - query: |
+          ((call_expression
+            function: (identifier) @fn) @sanitizer
+            (#any-of? @fn "parseInt" "Number" "parseFloat"))
+
+  - id: js.command-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "User-controlled data reaches a shell command"
+    description: >
+      Request- or argv-derived data flows into child_process exec()/execSync()
+      (or a spawn with a shell), allowing OS command injection.
+    remediation: >
+      Use execFile/spawn with an argument array and no shell, and validate
+      inputs against an allowlist.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(req|request)\\.(query|body|params|headers|cookies)"))
+      - label: process arguments / environment
+        query: |
+          ((member_expression) @source
+            (#match? @source "^process\\.(argv|env)"))
+    sinks:
+      - label: child_process execution
+        query: |
+          (call_expression
+            function: (member_expression
+              property: (property_identifier) @method)
+            arguments: (arguments . (_) @sink)
+            (#any-of? @method "exec" "execSync" "spawn" "spawnSync" "execFile"))
+      - label: child_process execution
+        query: |
+          (call_expression
+            function: (identifier) @fn
+            arguments: (arguments . (_) @sink)
+            (#any-of? @fn "exec" "execSync" "spawn" "spawnSync" "execFile"))
+      # Identity-resolved: catches aliased/namespaced imports of child_process
+      # (e.g. `import {exec as run}`) that the name-based queries above miss.
+      - label: child_process execution
+        resolved:
+          module: child_process
+          name: exec
+          arg_index: 0
+      - label: child_process execution
+        resolved: { module: child_process, name: execSync, arg_index: 0 }
+      - label: child_process execution
+        resolved: { module: child_process, name: spawn, arg_index: 0 }
+      - label: child_process execution
+        resolved: { module: child_process, name: spawnSync, arg_index: 0 }
+      - label: child_process execution
+        resolved: { module: child_process, name: execFile, arg_index: 0 }
+    sanitizers:
+      - query: |
+          ((call_expression
+            function: (identifier) @fn) @sanitizer
+            (#any-of? @fn "parseInt" "Number" "parseFloat"))
+
+  - id: js.xss.dom
+    kind: taint
+    severity: high
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "User-controlled data is written to the DOM without encoding"
+    description: >
+      Data from the URL or an HTTP request is assigned to innerHTML/outerHTML
+      or passed to document.write, enabling DOM-based cross-site scripting.
+    remediation: >
+      Use textContent, or sanitize HTML with a vetted library (e.g.
+      DOMPurify) before inserting it.
+    metadata:
+      cwe: [CWE-79]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: browser location / URL
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(window\\.)?(location|document\\.URL|document\\.location)"))
+      - label: HTTP request data
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(req|request)\\.(query|body|params|headers|cookies)"))
+    sinks:
+      - label: innerHTML/outerHTML assignment
+        query: |
+          (assignment_expression
+            left: (member_expression
+              property: (property_identifier) @prop)
+            right: (_) @sink
+            (#any-of? @prop "innerHTML" "outerHTML"))
+      - label: document.write
+        query: |
+          (call_expression
+            function: (member_expression) @fn
+            arguments: (arguments . (_) @sink)
+            (#match? @fn "^document\\.write(ln)?$"))
+
+  - id: js.path-traversal
+    kind: taint
+    severity: high
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "User-controlled data is used as a filesystem path"
+    description: >
+      Request-derived data flows into a filesystem call. Attackers can use
+      `../` sequences to read or write files outside the intended directory.
+    remediation: >
+      Resolve against a fixed base directory and verify the result stays
+      inside it, or map user input to known file names.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [AC-3, SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((member_expression) @source
+            (#match? @source "^(req|request)\\.(query|body|params|headers|cookies)"))
+    sinks:
+      - label: filesystem access
+        query: |
+          (call_expression
+            function: (member_expression
+              property: (property_identifier) @method)
+            arguments: (arguments . (_) @sink)
+            (#any-of? @method
+              "readFile" "readFileSync" "writeFile" "writeFileSync"
+              "createReadStream" "createWriteStream" "unlink" "unlinkSync"
+              "readdir" "readdirSync" "open" "openSync"))
+    sanitizers:
+      - query: |
+          ((call_expression
+            function: (member_expression
+              property: (property_identifier) @method)) @sanitizer
+            (#eq? @method "basename"))
+
+  - id: js.weak-crypto.hash
+    severity: medium
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "Weak hash algorithm `${algo}`"
+    description: >
+      MD5 and SHA-1 are cryptographically broken and unsuitable for
+      signatures, passwords, or integrity protection.
+    remediation: Use SHA-256 or stronger; for passwords use bcrypt/scrypt/argon2.
+    metadata:
+      cwe: [CWE-327, CWE-328]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+    query: |
+      (call_expression
+        function: (member_expression
+          property: (property_identifier) @method)
+        arguments: (arguments . (string (string_fragment) @algo))
+        (#eq? @method "createHash")
+        (#any-of? @algo "md5" "sha1" "MD5" "SHA1")) @finding
+
+  - id: js.hardcoded-secret
+    severity: high
+    category: security
+    languages: [javascript, typescript, tsx]
+    message: "Possible hardcoded secret in `${name}`"
+    description: >
+      A variable whose name suggests a credential is initialised with a
+      string literal. Secrets in source code leak through VCS history,
+      builds, and error reporting.
+    remediation: >
+      Load secrets from the environment or a secret manager; rotate any
+      committed credential.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      (variable_declarator
+        name: (identifier) @name
+        value: (string (string_fragment) @value)) @finding
+    filters:
+      - capture: name
+        pattern: "(?i)(password|passwd|secret|api_?key|auth_?token|private_?key|access_?key)"
+      - capture: value
+        pattern: ".{6,}"
+      - capture: value
+        pattern: "(?i)^(change|example|dummy|placeholder|xxx|todo|<)"
+        negate: true

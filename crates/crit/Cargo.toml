@@ -1,0 +1,27 @@
+[package]
+name = "crit"
+description = "AST-based multi-language SAST and code-quality scanner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "crit"
+path = "src/main.rs"
+
+[dependencies]
+crit-core = { path = "../crit-core" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+owo-colors.workspace = true
+tree-sitter.workspace = true
+streaming-iterator.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true

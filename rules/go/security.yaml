@@ -1,0 +1,200 @@
+# Security rules for Go.
+rules:
+  - id: go.sql-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [go]
+    message: "User-controlled data flows into a SQL query"
+    description: >
+      HTTP-request-derived data reaches db.Query/Exec. String-built SQL is
+      injectable.
+    remediation: >
+      Use placeholder parameters (`db.Query("... WHERE id = ?", id)`) and
+      keep query text constant.
+    metadata:
+      cwe: [CWE-89]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((selector_expression) @source
+            (#match? @source "^(r|req|request)\\.(URL\\.Query|FormValue|PostFormValue|Form|PostForm|Body|Header)$"))
+      - label: command line arguments
+        query: |
+          ((selector_expression) @source
+            (#eq? @source "os.Args"))
+    sinks:
+      - label: SQL execution
+        query: |
+          ((call_expression
+            function: (selector_expression field: (field_identifier) @_m)
+            arguments: (argument_list . (_) @sink))
+            (#any-of? @_m
+              "Query" "QueryRow" "Exec"
+              "QueryContext" "QueryRowContext" "ExecContext"))
+
+  - id: go.cmd-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [go]
+    message: "User-controlled data reaches exec.Command"
+    description: >
+      Request- or argv-derived data flows into exec.Command. With `sh -c`
+      or attacker-chosen binaries this is OS command injection.
+    remediation: >
+      Keep the command name static, pass user data only as discrete
+      arguments, and never route it through `sh -c`.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((selector_expression) @source
+            (#match? @source "^(r|req|request)\\.(URL\\.Query|FormValue|PostFormValue|Form|PostForm|Body|Header)$"))
+      - label: command line arguments
+        query: |
+          ((selector_expression) @source
+            (#eq? @source "os.Args"))
+    sinks:
+      - label: process execution
+        query: |
+          ((call_expression
+            function: (selector_expression) @_f
+            arguments: (argument_list (_) @sink))
+            (#any-of? @_f "exec.Command" "exec.CommandContext" "syscall.Exec"))
+      # Identity-resolved: catches aliased package imports of os/exec
+      # (e.g. `import ex "os/exec"; ex.Command(...)`) the text query misses.
+      # No arg_index: any argument may carry the injected command (matching the
+      # all-args text query above).
+      - label: process execution
+        resolved: { module: os/exec, name: Command }
+      - label: process execution
+        resolved: { module: os/exec, name: CommandContext }
+
+  - id: go.xss.direct-write
+    kind: taint
+    severity: high
+    category: security
+    languages: [go]
+    message: "User-controlled data written to an HTTP response without escaping"
+    remediation: >
+      Render through html/template (auto-escaping) instead of writing
+      request data to the ResponseWriter, or escape with
+      template.HTMLEscapeString.
+    metadata:
+      cwe: [CWE-79]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((selector_expression) @source
+            (#match? @source "^(r|req|request)\\.(URL\\.Query|FormValue|PostFormValue|Form|PostForm|Header)$"))
+    sinks:
+      - label: response write
+        query: |
+          ((call_expression
+            function: (selector_expression) @_f
+            arguments: (argument_list (_) @sink))
+            (#match? @_f "^(w|rw|resp)\\.Write$"))
+      - label: fprintf to response
+        query: |
+          ((call_expression
+            function: (selector_expression) @_f
+            arguments: (argument_list (identifier) @_w (_) @sink))
+            (#eq? @_f "fmt.Fprintf")
+            (#any-of? @_w "w" "rw" "resp"))
+    sanitizers:
+      - query: |
+          ((call_expression function: (selector_expression) @_f) @sanitizer
+            (#match? @_f "^(template\\.HTMLEscapeString|html\\.EscapeString)$"))
+
+  - id: go.path-traversal
+    kind: taint
+    severity: high
+    category: security
+    languages: [go]
+    message: "User-controlled data is used as a filesystem path"
+    remediation: >
+      Join with a fixed base via filepath.Join, then verify the cleaned
+      path still has the base as prefix; or map input to known names.
+    metadata:
+      cwe: [CWE-22]
+      owasp: ["A01:2021"]
+      nist: [AC-3, SI-10]
+    sources:
+      - label: HTTP request data
+        query: |
+          ((selector_expression) @source
+            (#match? @source "^(r|req|request)\\.(URL\\.Query|FormValue|PostFormValue|Form|PostForm)$"))
+    sinks:
+      - label: file access
+        query: |
+          ((call_expression
+            function: (selector_expression) @_f
+            arguments: (argument_list . (_) @sink))
+            (#match? @_f "^(os\\.(Open|OpenFile|Create|ReadFile|WriteFile|Remove|RemoveAll)|ioutil\\.(ReadFile|WriteFile))$"))
+    sanitizers:
+      - query: |
+          ((call_expression function: (selector_expression) @_f) @sanitizer
+            (#eq? @_f "filepath.Base"))
+
+  - id: go.weak-crypto
+    severity: medium
+    category: security
+    languages: [go]
+    message: "Weak cryptographic primitive `${algo}`"
+    description: crypto/md5, crypto/sha1, crypto/des and crypto/rc4 are broken or obsolete.
+    remediation: Use crypto/sha256+ for hashing, AES-GCM for encryption; bcrypt/argon2 for passwords.
+    metadata:
+      cwe: [CWE-327, CWE-328]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+    query: |
+      ((call_expression
+        function: (selector_expression) @algo)
+        (#match? @algo "^(md5|sha1|des|rc4)\\.(New|Sum|NewCipher)")) @finding
+
+  - id: go.tls-skip-verify
+    severity: high
+    category: security
+    languages: [go]
+    message: "TLS certificate verification is disabled"
+    description: >
+      InsecureSkipVerify: true disables certificate validation, enabling
+      man-in-the-middle attacks.
+    remediation: Remove InsecureSkipVerify or gate it strictly to test builds.
+    metadata:
+      cwe: [CWE-295]
+      owasp: ["A02:2021", "A05:2021"]
+      nist: [SC-8, SC-13]
+    query: |
+      ((keyed_element
+        (literal_element (identifier) @_key)
+        (literal_element (true) @_val))
+        (#eq? @_key "InsecureSkipVerify")) @finding
+
+  - id: go.hardcoded-secret
+    severity: high
+    category: security
+    languages: [go]
+    message: "Possible hardcoded secret in `${name}`"
+    remediation: Load secrets from the environment or a secret manager; rotate any committed credential.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      (short_var_declaration
+        left: (expression_list (identifier) @name)
+        right: (expression_list (interpreted_string_literal) @value)) @finding
+    filters:
+      - capture: name
+        pattern: "(?i)(password|passwd|secret|api_?key|auth_?token|private_?key|access_?key)"
+      - capture: value
+        pattern: ".{8,}"

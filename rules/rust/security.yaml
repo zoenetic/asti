@@ -1,0 +1,108 @@
+# Security and quality rules for Rust.
+rules:
+  - id: rs.cmd-injection
+    kind: taint
+    severity: high
+    category: security
+    languages: [rust]
+    message: "External input flows into a process Command"
+    description: >
+      Data from arguments or the environment reaches Command::new (or an
+      arg passed to it). Combined with `sh -c` this is command injection.
+    remediation: >
+      Keep the program name static and pass external values only as
+      discrete arguments; never interpolate into a shell string.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: process arguments / environment
+        query: |
+          ((call_expression function: (scoped_identifier) @_f) @source
+            (#match? @_f "(^|::)env::(args|args_os|var|var_os|vars)$"))
+    sinks:
+      - label: process command
+        query: |
+          ((call_expression
+            function: (scoped_identifier) @_f
+            arguments: (arguments (_) @sink))
+            (#match? @_f "(^|::)Command::new$"))
+
+  - id: rs.sql-injection.format
+    severity: high
+    category: security
+    languages: [rust]
+    message: "SQL query built with format! — use bound parameters"
+    description: >
+      Passing a format!-built string to a query function means values are
+      interpolated into SQL text instead of bound, enabling SQL injection
+      when any value is external.
+    remediation: >
+      Use the driver's parameter binding (e.g. sqlx `query("… WHERE id =
+      $1").bind(id)`), keeping the SQL string constant.
+    metadata:
+      cwe: [CWE-89]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    query: |
+      ((call_expression
+        function: [
+          (scoped_identifier name: (identifier) @_fn)
+          (identifier) @_fn
+          (field_expression field: (field_identifier) @_fn)
+        ]
+        arguments: (arguments
+          [
+            (macro_invocation macro: (identifier) @_macro)
+            (reference_expression (macro_invocation macro: (identifier) @_macro))
+          ]))
+        (#match? @_fn "^(query|query_as|query_scalar|sql_query|execute|prepare)$")
+        (#eq? @_macro "format")) @finding
+
+  - id: rs.unsafe-block
+    severity: info
+    category: quality
+    languages: [rust]
+    message: "unsafe block — verify invariants are documented and upheld"
+    description: >
+      unsafe code bypasses the compiler's memory-safety guarantees; each
+      block deserves a comment stating the invariant that makes it sound.
+    metadata:
+      cwe: [CWE-758]
+      nist: [SA-11]
+    query: "(unsafe_block) @finding"
+
+  - id: rs.quality.unwrap
+    severity: low
+    category: quality
+    languages: [rust]
+    message: "`.unwrap()` panics on failure"
+    description: >
+      unwrap() converts recoverable errors into panics. Fine in tests and
+      prototypes; avoid on fallible paths in production code.
+    remediation: "Use `?`, expect() with a diagnostic message, or explicit handling."
+    query: |
+      ((call_expression
+        function: (field_expression field: (field_identifier) @_m))
+        (#eq? @_m "unwrap")) @finding
+
+  - id: rs.hardcoded-secret
+    severity: high
+    category: security
+    languages: [rust]
+    message: "Possible hardcoded secret in `${name}`"
+    remediation: Load secrets from the environment or a secret manager; rotate any committed credential.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      (let_declaration
+        pattern: (identifier) @name
+        value: (string_literal) @value) @finding
+    filters:
+      - capture: name
+        pattern: "(?i)(password|passwd|secret|api_?key|auth_?token|private_?key|access_?key)"
+      - capture: value
+        pattern: ".{8,}"

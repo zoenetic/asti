@@ -1,0 +1,35 @@
+# Additional code-quality rules for Pascal / Delphi.
+rules:
+  - id: pas.quality.empty-except
+    severity: low
+    category: quality
+    languages: [pascal]
+    message: "Empty `except` block silently swallows exceptions"
+    description: >
+      A try..except whose handler body is empty (or contains only comments)
+      catches and discards every exception raised in the protected block,
+      hiding failures.
+    remediation: >
+      Log or rethrow the exception, or handle specific exception types with
+      an `on E: SomeException do` clause.
+    metadata:
+      cwe: [CWE-390]
+    query: |
+      (try (kExcept) . (comment)* . (kEnd)) @finding
+
+  - id: pas.quality.catch-all-except
+    severity: low
+    category: quality
+    languages: [pascal]
+    message: "Catch-all `except` handles every exception without type discrimination"
+    description: >
+      A bare `except <statements>` handler (with no `on E: Type do` clause)
+      catches all exception types indiscriminately, which can mask
+      unexpected errors and complicate diagnosis.
+    remediation: >
+      Handle specific exception types with `on E: SomeException do`, and
+      rethrow anything you cannot handle.
+    metadata:
+      cwe: [CWE-396]
+    query: |
+      (try except: (statements)) @finding

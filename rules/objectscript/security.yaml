@@ -1,0 +1,209 @@
+# Security rules for InterSystems ObjectScript.
+#
+# Sources model CSP/REST request data (%request); sinks cover dynamic SQL,
+# XECUTE/indirection code execution, $ZF OS callouts, and unescaped CSP
+# output.
+rules:
+  - id: os.sql-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [objectscript]
+    message: "User-controlled data flows into dynamic SQL"
+    description: >
+      Data read from %request (CSP/REST input) reaches %SQL.Statement
+      %Prepare/%ExecDirect or %ResultSet execution. Building SQL by
+      concatenation allows SQL injection against IRIS/Caché.
+    remediation: >
+      Use parameterized dynamic SQL ("... WHERE id = ?") and pass values via
+      %Execute arguments, or use embedded SQL with host variables.
+    metadata:
+      cwe: [CWE-89]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+      references:
+        - https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GSQL_dynsql
+    sources:
+      - label: HTTP request data (%request)
+        query: |
+          ((oref_chain_expr (lvn) @_obj) @source
+            (#any-of? @_obj "%request" "%session"))
+    sinks:
+      - label: dynamic SQL preparation/execution
+        query: |
+          ((oref_method
+            (method_name) @_m
+            (method_args (method_arg) @sink))
+            (#any-of? @_m "%Prepare" "%ExecDirect" "Prepare"))
+      - label: dynamic SQL preparation/execution
+        query: |
+          ((class_method_call
+            (method_name) @_m
+            (method_args (method_arg) @sink))
+            (#any-of? @_m "%ExecDirect" "%Prepare"))
+
+  - id: os.code-injection.xecute-taint
+    kind: taint
+    severity: critical
+    category: security
+    languages: [objectscript]
+    message: "User-controlled data reaches XECUTE"
+    description: >
+      Request-derived data flows into an XECUTE command, which executes it as
+      ObjectScript — remote code execution.
+    remediation: >
+      Never build XECUTE strings from external input; dispatch through a
+      fixed lookup of allowed operations instead.
+    metadata:
+      cwe: [CWE-94, CWE-95]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data (%request)
+        query: |
+          ((oref_chain_expr (lvn) @_obj) @source
+            (#any-of? @_obj "%request" "%session"))
+      - label: interactive READ input
+        query: "(command_read (read_argument (read_variable) @source))"
+    sinks:
+      - label: XECUTE command
+        query: "(command_xecute (xecute_argument) @sink)"
+
+  - id: os.cmd-injection.zf
+    kind: taint
+    severity: critical
+    category: security
+    languages: [objectscript]
+    message: "User-controlled data reaches a $ZF OS callout"
+    description: >
+      Request-derived data flows into $ZF(-1)/$ZF(-100), which spawn
+      operating-system processes — OS command injection.
+    remediation: >
+      Use $ZF(-100) with explicit argument arrays and validate every
+      argument against an allowlist; never concatenate input into commands.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data (%request)
+        query: |
+          ((oref_chain_expr (lvn) @_obj) @source
+            (#any-of? @_obj "%request" "%session"))
+      - label: interactive READ input
+        query: "(command_read (read_argument (read_variable) @source))"
+    sinks:
+      - label: $ZF OS callout argument
+        query: |
+          ((system_defined_function (method_arg) @sink) @_f
+            (#match? @_f "(?i)^\\$zf\\("))
+
+  - id: os.xss.csp-write
+    kind: taint
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "User-controlled data written to CSP output without escaping"
+    description: >
+      Request-derived data is WRITEn to the page without HTML escaping,
+      enabling reflected cross-site scripting in CSP pages.
+    remediation: >
+      Escape output with ##class(%CSP.Page).EscapeHTML(value) (or
+      ..EscapeHTML in a %CSP.Page subclass) before writing it.
+    metadata:
+      cwe: [CWE-79]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: HTTP request data (%request)
+        query: |
+          ((oref_chain_expr (lvn) @_obj) @source
+            (#eq? @_obj "%request"))
+    sinks:
+      - label: WRITE to CSP output
+        query: "(command_write (write_argument) @sink)"
+    sanitizers:
+      - query: |
+          ((oref_method (method_name) @_m) @sanitizer
+            (#any-of? @_m "EscapeHTML" "EscapeURL" "QuoteJS"))
+      - query: |
+          ((class_method_call (method_name) @_m) @sanitizer
+            (#any-of? @_m "EscapeHTML" "EscapeURL" "QuoteJS"))
+
+  - id: os.code-injection.xecute
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "XECUTE executes dynamically constructed ObjectScript"
+    description: >
+      XECUTE runs its string argument as code. Even without direct user
+      input it obscures control flow and easily becomes an injection point.
+    remediation: Prefer $CLASSMETHOD/$METHOD dispatch or a fixed DO lookup.
+    metadata:
+      cwe: [CWE-94, CWE-95]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    query: "(command_xecute) @finding"
+
+  - id: os.code-injection.indirection
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "Argument indirection (@) evaluates a variable as code"
+    description: >
+      The indirection operator executes/evaluates variable contents;
+      attacker-influenced values become code or unintended global
+      references.
+    remediation: >
+      Avoid indirection on externally influenced values; use arrays or
+      $CLASSMETHOD dispatch instead.
+    metadata:
+      cwe: [CWE-94, CWE-95]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    query: "(indirection) @finding"
+
+  - id: os.cmd-injection.zf-usage
+    severity: medium
+    category: security
+    languages: [objectscript]
+    message: "$ZF OS callout — review for injection and least privilege"
+    description: >
+      $ZF(-1)/$ZF(-100) execute operating-system commands from the IRIS
+      process. Any dynamic content in the command line is a command
+      injection risk.
+    remediation: >
+      Prefer $ZF(-100) with argument arrays over $ZF(-1) shell strings and
+      keep command names static.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10, CM-7]
+    query: |
+      ((system_defined_function) @finding
+        (#match? @finding "(?i)^\\$zf\\(\\s*-(1|100)"))
+
+  - id: os.hardcoded-secret
+    severity: high
+    category: security
+    languages: [objectscript]
+    message: "Possible hardcoded secret in `${name}`"
+    description: >
+      A variable whose name suggests a credential is SET to a string
+      literal.
+    remediation: >
+      Store credentials in IRIS managed credential storage or read them
+      from protected configuration; rotate any committed secret.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      (set_argument
+        (set_target) @name
+        (expression (string_literal) @value)) @finding
+    filters:
+      - capture: name
+        pattern: "(?i)(password|passwd|secret|api_?key|auth_?token|private_?key|access_?key)"
+      - capture: value
+        pattern: ".{8,}"

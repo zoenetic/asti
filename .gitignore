@@ -1,0 +1,9 @@
+/target
+# crit persistent scan state (cache + baseline). Commit baseline.json
+# deliberately if you want it under version control.
+/.crit/cache.json
+/.crit/summaries/
+# Downloaded benchmark corpora (e.g. the Juliet C# suite) — large & separately
+# licensed; the harness reads them from a path, they are not vendored.
+/benchmarks/**/juliet-csharp/
+/benchmarks/**/testcases/

@@ -1,0 +1,36 @@
+# Taint profile for Go.
+identifiers: [identifier]
+
+assignments:
+  - query: "(short_var_declaration left: (expression_list (identifier) @lhs) right: (expression_list (_) @rhs))"
+  - query: "(assignment_statement left: (expression_list (identifier) @lhs) right: (expression_list (_) @rhs))"
+  - query: "(var_spec name: (identifier) @lhs value: (expression_list (_) @rhs))"
+
+functions:
+  - query: "(function_declaration name: (identifier) @name) @function"
+  - query: "(method_declaration name: (field_identifier) @name) @function"
+  - query: "(func_literal) @function"
+
+params:
+  - query: "(parameter_declaration name: (identifier) @param)"
+
+calls:
+  - query: "(call_expression function: (identifier) @callee arguments: (argument_list) @args) @call"
+
+returns:
+  - query: "(return_statement (expression_list (_) @value))"
+
+# --- binding layer (0.2) ---
+member_access:
+  - query: "(selector_expression operand: (_) @object field: (field_identifier) @field) @access"
+
+method_calls:
+  - query: "(call_expression function: (selector_expression operand: (_) @receiver field: (field_identifier) @method) arguments: (argument_list) @args) @call"
+
+imports:
+  # import alias "os/exec"  and  import "os/exec"
+  - query: "(import_spec name: (package_identifier)? @alias path: (interpreted_string_literal) @module)"
+
+module_resolution:
+  strategy: symbol
+  extensions: [".go"]

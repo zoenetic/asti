@@ -1,0 +1,133 @@
+# Security rules for Pascal / Delphi.
+rules:
+  - id: pas.sql-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [pascal]
+    message: "User-controlled data flows into SQL text"
+    description: >
+      External input (command line, environment, or HTTP request objects)
+      reaches a SQL.Text/CommandText assignment or an ExecuteDirect-style
+      call, enabling SQL injection.
+    remediation: >
+      Use parameterized queries (Params/ParamByName) and keep SQL text
+      static.
+    metadata:
+      cwe: [CWE-89]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: command line / environment
+        query: |
+          ((exprCall entity: (identifier) @_f) @source
+            (#any-of? @_f "ParamStr" "GetEnvironmentVariable"))
+      - label: HTTP request field
+        query: |
+          ((exprDot) @source
+            (#match? @source "(?i)^(a?request|req)\\.(query|content|form)fields"))
+    sinks:
+      - label: SQL text assignment
+        query: |
+          ((assignment lhs: (exprDot) @_target rhs: (_) @sink)
+            (#match? @_target "(?i)\\.(sql\\.text|commandtext)$"))
+      - label: direct SQL execution
+        query: |
+          ((exprCall entity: (identifier) @_f args: (exprArgs (_) @sink))
+            (#match? @_f "(?i)^(ExecuteDirect|ExecSQLScalar|ExecuteQuery)$"))
+
+  - id: pas.cmd-injection
+    kind: taint
+    severity: critical
+    category: security
+    languages: [pascal]
+    message: "User-controlled data reaches a process-execution call"
+    description: >
+      External input flows into WinExec/ShellExecute/CreateProcess or
+      similar, allowing OS command injection.
+    remediation: >
+      Pass the executable path and arguments separately (e.g.
+      TProcess.Parameters / CreateProcess argument arrays) and validate
+      inputs against an allowlist.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    sources:
+      - label: command line / environment
+        query: |
+          ((exprCall entity: (identifier) @_f) @source
+            (#any-of? @_f "ParamStr" "GetEnvironmentVariable"))
+      - label: HTTP request field
+        query: |
+          ((exprDot) @source
+            (#match? @source "(?i)^(a?request|req)\\.(query|content|form)fields"))
+    sinks:
+      - label: process execution
+        query: |
+          ((exprCall entity: (identifier) @_f args: (exprArgs (_) @sink))
+            (#match? @_f "(?i)^(WinExec|ShellExecute[AW]?|CreateProcess[AW]?|ExecuteProcess|FpSystem|SysExecute|RunCommand)$"))
+
+  - id: pas.cmd-injection.usage
+    severity: medium
+    category: security
+    languages: [pascal]
+    message: "Process execution via `${callee}` — review arguments"
+    description: >
+      Shell/process launch functions execute whatever command line they are
+      given; any dynamic content is an injection risk.
+    metadata:
+      cwe: [CWE-78]
+      owasp: ["A03:2021"]
+      nist: [SI-10]
+    query: |
+      ((exprCall entity: (identifier) @callee) @finding
+        (#match? @callee "(?i)^(WinExec|FpSystem)$"))
+
+  - id: pas.weak-crypto.hash
+    severity: medium
+    category: security
+    languages: [pascal]
+    message: "Weak hash function `${callee}`"
+    description: MD5 and SHA-1 are cryptographically broken.
+    remediation: Use SHA-256 or stronger (e.g. THashSHA2); for passwords use scrypt/argon2.
+    metadata:
+      cwe: [CWE-327, CWE-328]
+      owasp: ["A02:2021"]
+      nist: [SC-13]
+    query: |
+      ((exprCall entity: (identifier) @callee) @finding
+        (#match? @callee "(?i)^(md5|sha1)(string|print|file|digest)?$"))
+
+  - id: pas.hardcoded-secret
+    severity: high
+    category: security
+    languages: [pascal]
+    message: "Possible hardcoded secret in `${name}`"
+    remediation: >
+      Load secrets from protected configuration or a secret manager; rotate
+      any committed credential.
+    metadata:
+      cwe: [CWE-798]
+      owasp: ["A07:2021"]
+      nist: [IA-5]
+    query: |
+      (assignment
+        lhs: (identifier) @name
+        rhs: (literalString) @value) @finding
+    filters:
+      - capture: name
+        pattern: "(?i)(password|passwd|secret|api_?key|auth_?token|private_?key|access_?key)"
+      - capture: value
+        pattern: ".{8,}"
+
+  - id: pas.quality.with-statement
+    severity: low
+    category: quality
+    languages: [pascal]
+    message: "`with` statement obscures identifier scope"
+    description: >
+      Identifiers inside `with` blocks resolve ambiguously as records gain
+      fields, causing silent behavior changes.
+    remediation: Reference the record/object explicitly.
+    query: "(with) @finding"
